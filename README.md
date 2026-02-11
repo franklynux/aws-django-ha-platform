@@ -808,8 +808,6 @@ This implementation demonstrates:
 ---
 
 **Author**: Franklyn Mbelu 
-**Contact**: chiwando3@outlook.com  
-**Repository**: https://github.com/cognetiks/Technical_DevOps_app  
+**Contact**: franklynmbelu@gmail.com
+**Repository**: https://github.com/franklynux/aws-django-ha-platform 
 **Date**: January 2025
-
-Thank you for reviewing this Technical DevOps assessment. I look forward to discussing the implementation details and design decisions. I look forward to your feedback!
