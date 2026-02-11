@@ -1,8 +1,8 @@
-# Technical DevOps Assessment - Django Infrastructure
+# Highly Available Django Application Platform on AWS
 
 ## Overview
 
-This project demonstrates a production-ready, highly available Infrastructure as Code (IaC) solution for deploying a Django web application on AWS. The implementation showcases enterprise-grade infrastructure automation using both Terraform and CloudFormation, featuring multi-tier architecture, automated scaling, comprehensive monitoring, and security best practices.
+A production-ready, highly available Infrastructure as Code (IaC) solution for deploying Django web applications on AWS. This platform showcases enterprise-grade infrastructure automation using both Terraform and CloudFormation, featuring multi-tier architecture, automated scaling, comprehensive monitoring, and security best practices.
 
 **Key Features:**
 - Multi-AZ deployment for high availability and fault tolerance
@@ -12,6 +12,9 @@ This project demonstrates a production-ready, highly available Infrastructure as
 - Application Load Balancer with health checks
 - VPC with public, private, and database subnet tiers
 - CloudWatch monitoring with SNS email alerts
+- Kubernetes (EKS) deployment with Helm charts
+- Observability stack with Prometheus and Grafana
+- Horizontal Pod Autoscaling for containerized workloads
 - Systems Manager Session Manager for secure instance access
 - CI/CD ready with GitHub Actions for Docker builds
 
@@ -41,9 +44,17 @@ This project demonstrates a production-ready, highly available Infrastructure as
 ## Quick Start
 
 ### Prerequisites
+
+**For EC2 Deployment:**
 - AWS CLI configured with appropriate permissions
 - Terraform 1.0+ or AWS CLI for CloudFormation
-- EC2 Key Pair created in target region
+- EC2 Key Pair created in target region (optional)
+
+**For Kubernetes Deployment:**
+- Docker installed locally
+- kubectl configured
+- eksctl or AWS CLI with EKS permissions
+- Helm 3.x for chart deployment
 
 ### Terraform Deployment
 ```bash
@@ -130,7 +141,7 @@ ALB_DNS=$(aws cloudformation describe-stacks \
   --query 'Stacks[0].Outputs[?OutputKey==`ALBDNSName`].OutputValue' \
   --output text)
 
-curl -I http://$ALB_DNS/health
+curl -I http://$ALB_DNS/health/
 ```
 
 ## Configuration
@@ -141,7 +152,7 @@ curl -I http://$ALB_DNS/health
 aws_region = "us-east-1"
 environment = "production"
 key_name = "your-ec2-key-pair"
-notification_email = "your-email@example.com"
+notification_email = "example@example.com"
 ```
 
 **Advanced Configuration**: Each module includes `terraform.tfvars.example` for customizing instance types, scaling parameters, and network settings.
@@ -156,13 +167,13 @@ terraform/
 ├── outputs.tf             # Infrastructure outputs (ALB DNS, RDS endpoint)
 ├── terraform.tfvars       # Environment-specific configuration
 └── modules/
-    ├── VPC/               # VPC, subnets, route tables, NAT gateways
-    ├── Networking/        # Security groups for ALB, apps, RDS, bastion
-    ├── ASG/              # Launch template, Auto Scaling Group, bastion host
-    ├── ALB/              # Application Load Balancer, target groups, listeners
-    ├── RDS/              # PostgreSQL database, subnet groups, Multi-AZ
+    ├── vpc/               # VPC, subnets, route tables, NAT gateways
+    ├── networking/        # Security groups for ALB, apps, RDS, bastion
+    ├── asg/               # Launch template, Auto Scaling Group, bastion host
+    ├── alb/               # Application Load Balancer, target groups, listeners
+    ├── rds/               # PostgreSQL database, subnet groups, Multi-AZ
     ├── S3/               # S3 bucket for static files and logs
-    └── cloudwatch/       # CloudWatch alarms, SNS topics, monitoring
+    └── cloudwatch/        # CloudWatch alarms, SNS topics, monitoring
 ```
 
 #### CloudFormation Templates
@@ -210,7 +221,7 @@ cloudformation/
 - **Gunicorn**: WSGI server (3 workers, port 8000)
 - **Nginx**: Reverse proxy and static file serving (port 80)
 - **Python**: 3.10+ with virtual environment
-- **Health Endpoint**: `/health` returns 200 OK
+- **Health Endpoint**: `/health/` returns 200 OK
 
 **Bastion Host**:
 - Single t2.micro instance in public subnet
@@ -222,7 +233,7 @@ cloudformation/
 **Application Load Balancer**:
 - **Type**: Internet-facing, application layer (Layer 7)
 - **Subnets**: Deployed across 2 public subnets (Multi-AZ)
-- **Health Check**: HTTP GET /health every 30s
+- **Health Check**: HTTP GET /health/ every 30s
 - **Thresholds**: 2 healthy, 2 unhealthy checks
 - **Timeout**: 5 seconds
 - **Listener**: HTTP port 80 (HTTPS can be added with ACM certificate)
@@ -252,15 +263,24 @@ cloudformation/
 
 ### Monitoring & Alerting
 
-**CloudWatch Alarms**:
+**CloudWatch (EC2 Deployment)**:
 - **High CPU Alarm**: Triggers at 80% average CPU over 10 minutes
 - **Auto Scaling Events**: Monitors scale-up/scale-down activities
 - **Target Health**: Monitors unhealthy targets in ALB
+- **SNS Notifications**: Email alerts for critical alarms
 
-**SNS Notifications**:
-- Email alerts for critical alarms
-- Configurable via NotificationEmail parameter
-- Subscription confirmation required on first deployment
+**Prometheus & Grafana (Kubernetes Deployment)**:
+- **Prometheus**: Metrics collection and time-series database
+  - Scrapes Django metrics from `django-app.django-app.svc.cluster.local:8000/metrics` (`job="django-app-scraping"`)
+  - Scrapes Prometheus self-metrics from `localhost:9090`
+  - Stores application/process metrics (HTTP, DB, CPU, memory RSS, scrape health)
+  - Configurable alerting rules
+- **Grafana**: Visualization and dashboards
+  - Prometheus datasource is provisioned via `k8s/grafana-datasource-config.yaml`
+  - Dashboard queries in this README target `job="django-app-scraping"`
+  - Application and infrastructure (process-level) dashboards
+  - Custom alerting with multiple notification channels
+  - Access via port-forward: `kubectl port-forward -n monitoring svc/grafana 3000:3000`
 
 **SSM Parameter Store**:
 - `/DjangoApp/rds_endpoint` - RDS database endpoint
@@ -313,12 +333,12 @@ sudo systemctl status nginx
 sudo tail -f /var/log/nginx/error.log
 
 # Test health endpoint locally
-curl http://localhost/health
+curl http://localhost/health/
 ```
 
 **2. Instances Not Registering with ALB**
 - Verify security group allows ALB → App on port 80
-- Check health check path matches `/health`
+- Check health check path matches `/health/`
 - Ensure Nginx is listening on port 80
 - Wait for health check grace period (300s)
 
@@ -475,21 +495,27 @@ eksctl create cluster --name django-app --region us-east-1 --nodegroup-name djan
 ### Docker Containerization
 ```bash
 # Build Django application image
-docker build -t django-app:latest .
+docker build -t cognetiks_django_app:v2 .
 
 # Tag and push to Docker Hub
 docker login
-docker tag django-app:latest <your-dockerhub-username>/django-app:latest
-docker push <your-dockerhub-username>/django-app:latest
+docker tag cognetiks_django_app:v2 <your-dockerhub-username>/cognetiks_django_app:v2
+docker push <your-dockerhub-username>/cognetiks_django_app:v2
 ```
 
 ### Kubernetes Deployment
 ```bash
-# Deploy application using Helm (recommended)
-helm install django-app helm/django-app/ \
-  --set image.repository=<your-dockerhub-username>/django-app \
-  --set image.tag=latest \
+# Deploy application using Helm values file (recommended)
+helm upgrade --install django-app helm/django-app/ \
+  -f helm/django-app/values.yaml \
   --create-namespace \
+  --namespace django-app
+
+# Optional: override image repository/tag during deploy
+helm upgrade --install django-app helm/django-app/ \
+  -f helm/django-app/values.yaml \
+  --set image.repository=<your-dockerhub-username>/cognetiks_django_app \
+  --set image.tag=v2 \
   --namespace django-app
 
 # Verify deployment
@@ -521,43 +547,38 @@ k8s/                            # Monitoring stack manifests
 ├── prometheus-config.yaml      # Prometheus configuration
 ├── prometheus-deployment.yaml  # Prometheus deployment
 ├── grafana-datasource-config.yaml  # Grafana data source
-└── grafana-deployment.yaml     # Grafana deployment
+├── grafana-deployment.yaml     # Grafana deployment
+└── grafana-dashboard-django-app.json # Importable Grafana dashboard
 ```
 
 ### Helm Chart Configuration
 Edit `helm/django-app/values.yaml` to customize:
 ```yaml
 image:
-  repository: <your-dockerhub-username>/django-app
-  tag: latest
-  pullPolicy: IfNotPresent
+  repository: franklynux/cognetiks_django_app
+  tag: "v2"
+  pullPolicy: Always
 
-replicaCount: 2
+replicaCount: 3
 
-resources:
-  limits:
-    cpu: 500m
-    memory: 512Mi
-  requests:
-    cpu: 250m
-    memory: 256Mi
+service:
+  type: LoadBalancer
+  port: 8000
 
 autoscaling:
   enabled: true
   minReplicas: 2
   maxReplicas: 5
-  targetCPUUtilizationPercentage: 70
+  targetCPUUtilizationPercentage: 80
 
 ingress:
-  enabled: true
-  className: alb
-  annotations:
-    alb.ingress.kubernetes.io/scheme: internet-facing
+  enabled: false
 ```
 
 ### Monitoring Setup
 ```bash
 # Deploy Prometheus
+kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
 kubectl apply -f k8s/prometheus-config.yaml
 kubectl apply -f k8s/prometheus-deployment.yaml
 
@@ -571,24 +592,38 @@ kubectl get pods -n monitoring
 # Access Grafana
 kubectl port-forward -n monitoring svc/grafana 3000:3000
 # Default credentials: admin/admin
+
+# Import the provided dashboard JSON from this repo:
+# Dashboards -> Import -> Upload k8s/grafana-dashboard-django-app.json
 ```
 
 ### Grafana Dashboards
 
 #### Application Performance Dashboard
-![Django App Performance](./screenshots/)
+![Django App Performance](./screenshots/Application-metrics-dashboard.png)
 
-*Metrics: Request rate, response time, error rate, active connections*
+*Metrics: Request rate, response time (p95 latency), error rate (5xx %).*
+
+```promql
+sum(rate(django_http_requests_total_by_method_total{job="django-app-scraping"}[5m]))
+
+histogram_quantile(0.95, sum(rate(django_http_requests_latency_including_middlewares_seconds_bucket{job="django-app-scraping"}[5m])) by (le))
+
+100 * sum(rate(django_http_responses_total_by_status_total{job="django-app-scraping",status=~"5.."}[5m])) / clamp_min(sum(rate(django_http_responses_total_by_status_total{job="django-app-scraping"}[5m])), 1e-9)
+```
 
 #### Infrastructure Metrics Dashboard
-![Infrastructure Metrics](./screenshots/)
+![Infrastructure Metrics](./screenshots/Infrastructure-metrics-dashboard.png)
 
-*Metrics: CPU utilization, memory usage, network I/O, pod scaling events*
+*Metrics: CPU usage, memory RSS, target scrape health.*
 
-#### Database Performance Dashboard
-![Database Performance](./screenshots/)
+```promql
+sum(rate(process_cpu_seconds_total{job="django-app-scraping",namespace="django-app"}[5m]))
 
-*Metrics: Connection count, query performance, database size, replication lag*
+sum(process_resident_memory_bytes{job="django-app-scraping",namespace="django-app"})
+
+100 * avg_over_time(up{job="django-app-scraping",namespace="django-app"}[5m])
+```
 
 ### Helm Chart Management
 ```bash
@@ -631,7 +666,8 @@ kubectl get svc -n django-app
 kubectl get ingress -n django-app
 
 # Test application
-curl -I http://<service-endpoint>/health
+curl -I http://<service-endpoint>/
+curl -I http://<service-endpoint>/metrics
 ```
 
 ### Troubleshooting EKS
@@ -689,7 +725,7 @@ aws wafv2 associate-web-acl \
 ## CI/CD Pipeline
 
 ### GitHub Actions Workflow
-Automated Docker image builds on every push to main:
+Automated Docker image builds on push and pull requests to `main`:
 
 ```yaml
 # .github/workflows/docker-build.yml
@@ -697,6 +733,8 @@ name: Build & Push Docker Image
 
 on:
   push:
+    branches: [main]
+  pull_request:
     branches: [main]
 
 jobs:
@@ -711,10 +749,13 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/build-push-action@v5
         with:
+          context: .
           push: true
           tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/django-app:latest
-            ${{ secrets.DOCKERHUB_USERNAME }}/django-app:${{ github.sha }}
+            ${{ secrets.DOCKERHUB_USERNAME }}/cognetiks_django_app:v2
+            ${{ secrets.DOCKERHUB_USERNAME }}/cognetiks_django_app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 ```
 
 ### Required GitHub Secrets

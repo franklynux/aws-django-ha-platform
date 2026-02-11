@@ -8,7 +8,7 @@ image:
   repository: franklynux/cognetiks_django_app
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "v3"
+  tag: "v2"
 
 imagePullSecrets: []
 nameOverride: "django-app"

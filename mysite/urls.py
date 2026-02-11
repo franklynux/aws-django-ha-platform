@@ -23,6 +23,5 @@ def home(request):
 urlpatterns = [
     path('', home, name='home'),
     path('admin/', admin.site.urls),
-    path('metrics/', include('django_prometheus.urls')),
-    path('metrics', include('django_prometheus.urls')), 
-    ]
+    path('', include('django_prometheus.urls')),
+]
