@@ -1,12 +1,7 @@
 # Cloud Build pipeline for deploying this Django container to Cloud Run.
 #
-# Before first run, create the Artifact Registry repository used by _AR_REPO:
-# gcloud artifacts repositories create cloud-run-source-deploy \
-#   --repository-format=docker \
-#   --location=us-central1
-#
 # Required Cloud Build service account permissions:
-# - Artifact Registry Writer
+# - Artifact Registry Administrator
 # - Cloud Run Admin
 # - Service Account User
 
@@ -16,6 +11,19 @@ substitutions:
   _AR_REPO: cloud-run-source-deploy
 
 steps:
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    id: Ensure Artifact Registry repository exists
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        gcloud artifacts repositories describe "${_AR_REPO}" \
+          --location="${_REGION}" \
+        || gcloud artifacts repositories create "${_AR_REPO}" \
+          --repository-format=docker \
+          --location="${_REGION}" \
+          --description="Docker images for Cloud Run deployments"
+
   - name: gcr.io/cloud-builders/docker
     id: Build image
     args:
