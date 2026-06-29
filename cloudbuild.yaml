@@ -6,7 +6,7 @@
 # - Service Account User
 
 substitutions:
-  _REGION: us-east1
+  _REGION: europe-west1
   _SERVICE_NAME: django-devops-app
   _AR_REPO: cloud-run-source-deploy
 
